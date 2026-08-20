@@ -20,6 +20,7 @@ import pytest
 from tests._integration_support import (
     CAST_NO_EVIDENCE,
     CLEAN_SOURCE,
+    UNPARSEABLE_SOURCE,
     commit_all,
     git_available,
     git_checked,
@@ -29,7 +30,7 @@ from tests._integration_support import (
     write_file,
     write_project,
 )
-from typewitness.errors import GitError, UsageError
+from typewitness.errors import FilesystemError, GitError, UsageError
 from typewitness.exit_codes import EXIT_USAGE_ERROR
 from typewitness.git import (
     DIFF_REF,
@@ -852,3 +853,337 @@ def test_changed_lines_signature_accepts_only_a_selection() -> None:
     parameters: Tuple[str, ...] = tuple(inspect.signature(changed_lines).parameters)
 
     assert parameters == ("project", "selection", "max_file_bytes", "max_line_count")
+
+
+# ----------------------------------------------------------- git-scoped runner
+
+
+@requires_git
+@pytest.mark.parametrize("git_mode", [STAGED, WORKTREE, DIFF_REF])
+def test_git_mode_never_reads_unchanged_ignored_malformed_python(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    git_mode: str,
+) -> None:
+    import typewitness.runner as runner_module
+    from typewitness.discovery import read_source as discovery_read_source
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(
+        tmp_path,
+        {
+            "mod.py": CLEAN_SOURCE,
+            ".gitignore": ".uv-cache/\n",
+            ".uv-cache/broken.py": UNPARSEABLE_SOURCE,
+        },
+    )
+    project = discover_project(root)
+    write_file(root, "mod.py", CAST_NO_EVIDENCE)
+    if git_mode == STAGED:
+        stage(root, "mod.py")
+        selection = GitSelection(mode=STAGED)
+    elif git_mode == DIFF_REF:
+        commit_all(root, "second")
+        selection = GitSelection(mode=DIFF_REF, ref="HEAD~1")
+    else:
+        selection = GitSelection(mode=WORKTREE)
+
+    read_paths: list[str] = []
+    analyzed_paths: list[str] = []
+    original_read = discovery_read_source
+    original_analyze = runner_module.analyze
+
+    def tracking_read(*args: Any, **kwargs: Any) -> Any:
+        result = original_read(*args, **kwargs)
+        read_paths.append(project.canonical(args[1]))
+        return result
+
+    def tracking_analyze(source: Any, config: Any = None) -> Any:
+        analyzed_paths.append(source.path.as_posix())
+        return original_analyze(source, config)
+
+    monkeypatch.setattr(runner_module, "read_source", tracking_read)
+    monkeypatch.setattr(runner_module, "analyze", tracking_analyze)
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    result = run_analysis(
+        paths=[],
+        settings=settings,
+        project=project,
+        git_selection=selection,
+    )
+
+    assert result.findings
+    assert "mod.py" in analyzed_paths
+    assert ".uv-cache/broken.py" not in read_paths
+    assert ".uv-cache/broken.py" not in analyzed_paths
+
+
+@requires_git
+def test_git_mode_explicit_file_input_intersects_with_changed_lines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import typewitness.runner as runner_module
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(tmp_path, {"mod.py": CLEAN_SOURCE, "other.py": CLEAN_SOURCE})
+    project = discover_project(root)
+    write_file(root, "mod.py", CAST_NO_EVIDENCE)
+    write_file(root, "other.py", CAST_NO_EVIDENCE)
+
+    analyzed_paths: list[str] = []
+    original_analyze = runner_module.analyze
+
+    def tracking_analyze(source: Any, config: Any = None) -> Any:
+        analyzed_paths.append(source.path.as_posix())
+        return original_analyze(source, config)
+
+    monkeypatch.setattr(runner_module, "analyze", tracking_analyze)
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    result = run_analysis(
+        paths=["mod.py"],
+        settings=settings,
+        project=project,
+        git_selection=GitSelection(mode=WORKTREE),
+    )
+
+    assert result.findings
+    assert analyzed_paths == ["mod.py"]
+
+
+@requires_git
+def test_git_mode_explicit_directory_input_intersects_with_changed_lines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import typewitness.runner as runner_module
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(
+        tmp_path,
+        {
+            "pkg/a.py": CLEAN_SOURCE,
+            "pkg/b.py": CLEAN_SOURCE,
+            "outside.py": CLEAN_SOURCE,
+        },
+    )
+    project = discover_project(root)
+    write_file(root, "pkg/a.py", CAST_NO_EVIDENCE)
+    write_file(root, "pkg/b.py", CAST_NO_EVIDENCE)
+    write_file(root, "outside.py", CAST_NO_EVIDENCE)
+
+    analyzed_paths: list[str] = []
+    original_analyze = runner_module.analyze
+
+    def tracking_analyze(source: Any, config: Any = None) -> Any:
+        analyzed_paths.append(source.path.as_posix())
+        return original_analyze(source, config)
+
+    monkeypatch.setattr(runner_module, "analyze", tracking_analyze)
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    result = run_analysis(
+        paths=["pkg"],
+        settings=settings,
+        project=project,
+        git_selection=GitSelection(mode=WORKTREE),
+    )
+
+    assert result.findings
+    assert sorted(analyzed_paths) == ["pkg/a.py", "pkg/b.py"]
+
+
+@requires_git
+def test_git_mode_skips_changed_non_python_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import typewitness.runner as runner_module
+    from typewitness.discovery import read_source as discovery_read_source
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(tmp_path, {"mod.py": CLEAN_SOURCE, "notes.txt": "hello\n"})
+    project = discover_project(root)
+    write_file(root, "mod.py", CAST_NO_EVIDENCE)
+    write_file(root, "notes.txt", "hello world\n")
+
+    read_paths: list[str] = []
+    original_read = discovery_read_source
+
+    def tracking_read(*args: Any, **kwargs: Any) -> Any:
+        result = original_read(*args, **kwargs)
+        read_paths.append(project.canonical(args[1]))
+        return result
+
+    monkeypatch.setattr(runner_module, "read_source", tracking_read)
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    result = run_analysis(
+        paths=[],
+        settings=settings,
+        project=project,
+        git_selection=GitSelection(mode=WORKTREE),
+    )
+
+    assert result.findings
+    assert read_paths == ["mod.py"]
+
+
+@requires_git
+def test_git_mode_explicit_dot_skips_ignored_cache_without_walking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import typewitness.discovery as discovery_module
+    import typewitness.runner as runner_module
+    from typewitness.discovery import read_source as discovery_read_source
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(
+        tmp_path,
+        {
+            "mod.py": CLEAN_SOURCE,
+            ".gitignore": ".uv-cache/\n",
+            ".uv-cache/broken.py": UNPARSEABLE_SOURCE,
+        },
+    )
+    project = discover_project(root)
+    write_file(root, "mod.py", CAST_NO_EVIDENCE)
+
+    def fail_walk(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("discover_paths must not walk explicit git scopes")
+
+    read_paths: list[str] = []
+    original_read = discovery_read_source
+
+    def tracking_read(*args: Any, **kwargs: Any) -> Any:
+        result = original_read(*args, **kwargs)
+        read_paths.append(project.canonical(args[1]))
+        return result
+
+    monkeypatch.setattr(discovery_module, "discover_paths", fail_walk)
+    monkeypatch.setattr(runner_module, "read_source", tracking_read)
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    result = run_analysis(
+        paths=["."],
+        settings=settings,
+        project=project,
+        git_selection=GitSelection(mode=WORKTREE),
+    )
+
+    assert result.findings
+    assert read_paths == ["mod.py"]
+
+
+@requires_git
+def test_git_mode_skips_staged_file_missing_from_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(tmp_path, {"mod.py": CLEAN_SOURCE})
+    project = discover_project(root)
+    write_file(root, "mod.py", CAST_NO_EVIDENCE)
+    stage(root, "mod.py")
+    (root / "mod.py").unlink()
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    result = run_analysis(
+        paths=[],
+        settings=settings,
+        project=project,
+        git_selection=GitSelection(mode=STAGED),
+    )
+
+    assert result.findings == ()
+    assert result.errors == ()
+
+
+@requires_git
+def test_git_mode_explicit_missing_path_raises_filesystem_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(tmp_path, {"mod.py": CLEAN_SOURCE})
+    project = discover_project(root)
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    with pytest.raises(FilesystemError) as excinfo:
+        run_analysis(
+            paths=["missing.py"],
+            settings=settings,
+            project=project,
+            git_selection=GitSelection(mode=WORKTREE),
+        )
+
+    assert excinfo.value.exit_code == EXIT_USAGE_ERROR
+    assert "missing.py" in str(excinfo.value)
+
+
+@requires_git
+def test_git_mode_explicit_symlink_raises_filesystem_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(tmp_path, {"real.py": CLEAN_SOURCE})
+    project = discover_project(root)
+    (root / "alias.py").symlink_to(root / "real.py")
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    with pytest.raises(FilesystemError) as excinfo:
+        run_analysis(
+            paths=["alias.py"],
+            settings=settings,
+            project=project,
+            git_selection=GitSelection(mode=WORKTREE),
+        )
+
+    assert excinfo.value.exit_code == EXIT_USAGE_ERROR
+    assert "alias.py" in str(excinfo.value)
+
+
+@requires_git
+def test_git_mode_explicit_outside_root_raises_filesystem_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typewitness.runner import run_analysis
+    from typewitness.settings import SettingsOverlay, resolve_settings
+
+    root = _repo(tmp_path, {"mod.py": CLEAN_SOURCE})
+    outsider = write_file(make_root(tmp_path, "elsewhere"), "other.py", CLEAN_SOURCE)
+    project = discover_project(root)
+    monkeypatch.chdir(root)
+
+    settings = resolve_settings(SettingsOverlay())
+    with pytest.raises(FilesystemError):
+        run_analysis(
+            paths=[str(outsider)],
+            settings=settings,
+            project=project,
+            git_selection=GitSelection(mode=WORKTREE),
+        )
