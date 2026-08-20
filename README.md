@@ -35,7 +35,35 @@ to, it stays quiet rather than guessing:
 
 Fingerprints and findings are verified to be byte-identical across all six supported versions.
 
-## Installation
+## Install with an agent skill
+
+```bash
+npx skills add micic-mihajlo/typewitness --skill install-typewitness
+```
+
+Then ask your coding agent to install or configure TypeWitness in the current Python repository. The skill adds TypeWitness as a development dependency, wires the `typewitness` CLI into the repository's existing lint or check workflow and/or pre-commit or prek setup, keeps defaults unless configuration is needed, and validates through the project's normal command.
+
+To inspect available skills first:
+
+```bash
+npx skills add micic-mihajlo/typewitness --list
+```
+
+## Run TypeWitness
+
+After installation, run TypeWitness from a project directory that contains `pyproject.toml`:
+
+```bash
+typewitness
+typewitness --format json
+typewitness --select TW002 pkg/mod.py
+```
+
+Findings go to stdout; source analysis errors go to stderr. Exit codes: `0` clean, `1` findings, `2` analysis errors, `3` usage/config/git/filesystem errors.
+
+Configuration lives in `[tool.typewitness]` inside `pyproject.toml`. CLI flags override pyproject values. See [Command-line interface](#command-line-interface) for git scoping, baselines, and input limits.
+
+## Manual installation
 
 TypeWitness is not published to PyPI yet. After its first release:
 
@@ -43,13 +71,15 @@ TypeWitness is not published to PyPI yet. After its first release:
 pip install typewitness
 ```
 
-From a source checkout:
+Until then, install from the GitHub repository with your package manager's dev-dependency workflow, or from a source checkout:
 
 ```bash
 pip install .
 ```
 
-## Usage
+Pre-commit integration is available via `.pre-commit-hooks.yaml` in this repository.
+
+## Library usage
 
 ```python
 import pathlib
@@ -342,17 +372,13 @@ Enabling or disabling a rule never changes another rule's fingerprints.
 
 ## Command-line interface
 
-After installation, run TypeWitness from a project directory that contains `pyproject.toml`:
+Advanced CLI usage:
 
 ```bash
-typewitness
-typewitness --format json
-typewitness --select TW002 pkg/mod.py
 typewitness --baseline typewitness-baseline.json --write-baseline
 typewitness --worktree
+typewitness --diff-ref origin/main
 ```
-
-Configuration lives in `[tool.typewitness]` inside `pyproject.toml`. CLI flags override pyproject values. Findings go to stdout; source analysis errors go to stderr. Exit codes: `0` clean, `1` findings, `2` analysis errors, `3` usage/config/git/filesystem errors.
 
 ### Input limits
 
