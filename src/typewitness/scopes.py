@@ -44,6 +44,7 @@ TYPING_SYMBOLS = frozenset(
         "TypeVarTuple",
         "Union",
         "cast",
+        "no_type_check",
         "overload",
         "runtime_checkable",
     }
@@ -57,6 +58,98 @@ class ResolutionKind(str, Enum):
     TYPING_EXT_MODULE = "typing_extensions_module"
     BUILTIN_OBJECT = "builtin_object"
     OPAQUE = "opaque"
+
+
+class SymbolIdentity(str, Enum):
+    UNKNOWN = "unknown"
+    TYPING_NO_TYPE_CHECK = "typing.no_type_check"
+    TYPING_TYPE_GUARD = "typing.TypeGuard"
+    TYPING_TYPE_IS = "typing.TypeIs"
+    TYPING_TYPE_VAR = "typing.TypeVar"
+    TYPING_OVERLOAD = "typing.overload"
+    TYPING_PROTOCOL = "typing.Protocol"
+    TYPING_ANY = "typing.Any"
+    MOCK_PATCH = "mock.patch"
+    MOCK_PATCH_OBJECT = "mock.patch.object"
+    MOCK_MODULE = "mock"
+    JSON_MODULE = "json"
+    JSON_LOAD = "json.load"
+    JSON_LOADS = "json.loads"
+    PICKLE_MODULE = "pickle"
+    PICKLE_LOAD = "pickle.load"
+    PICKLE_LOADS = "pickle.loads"
+    MARSHAL_MODULE = "marshal"
+    MARSHAL_LOAD = "marshal.load"
+    MARSHAL_LOADS = "marshal.loads"
+    TOMLLIB_MODULE = "tomllib"
+    TOMLLIB_LOAD = "tomllib.load"
+    TOMLLIB_LOADS = "tomllib.loads"
+    PLISTLIB_MODULE = "plistlib"
+    PLISTLIB_LOAD = "plistlib.load"
+    PLISTLIB_LOADS = "plistlib.loads"
+    AST_MODULE = "ast"
+    AST_LITERAL_EVAL = "ast.literal_eval"
+    UNITTEST_MODULE = "unittest"
+
+
+_RESOLVABLE_SYMBOL_IDENTITIES = tuple(
+    identity for identity in SymbolIdentity if identity is not SymbolIdentity.UNKNOWN
+)
+_SYMBOL_IDENTITY_BITS = {
+    identity: 1 << index for index, identity in enumerate(_RESOLVABLE_SYMBOL_IDENTITIES)
+}
+_SYMBOL_IDENTITY_BY_BIT = {bit: identity for identity, bit in _SYMBOL_IDENTITY_BITS.items()}
+_SYMBOL_IDENTITY_CONFLICT_BIT = 1 << len(_RESOLVABLE_SYMBOL_IDENTITIES)
+
+_TYPING_SYMBOL_IDENTITIES = {
+    "no_type_check": SymbolIdentity.TYPING_NO_TYPE_CHECK,
+    "TypeGuard": SymbolIdentity.TYPING_TYPE_GUARD,
+    "TypeIs": SymbolIdentity.TYPING_TYPE_IS,
+    "TypeVar": SymbolIdentity.TYPING_TYPE_VAR,
+    "overload": SymbolIdentity.TYPING_OVERLOAD,
+    "Protocol": SymbolIdentity.TYPING_PROTOCOL,
+    "Any": SymbolIdentity.TYPING_ANY,
+}
+
+_STDLIB_MODULE_IDENTITIES = {
+    "json": SymbolIdentity.JSON_MODULE,
+    "pickle": SymbolIdentity.PICKLE_MODULE,
+    "marshal": SymbolIdentity.MARSHAL_MODULE,
+    "tomllib": SymbolIdentity.TOMLLIB_MODULE,
+    "plistlib": SymbolIdentity.PLISTLIB_MODULE,
+    "ast": SymbolIdentity.AST_MODULE,
+}
+
+_STDLIB_FUNCTION_IDENTITIES = {
+    ("json", "load"): SymbolIdentity.JSON_LOAD,
+    ("json", "loads"): SymbolIdentity.JSON_LOADS,
+    ("pickle", "load"): SymbolIdentity.PICKLE_LOAD,
+    ("pickle", "loads"): SymbolIdentity.PICKLE_LOADS,
+    ("marshal", "load"): SymbolIdentity.MARSHAL_LOAD,
+    ("marshal", "loads"): SymbolIdentity.MARSHAL_LOADS,
+    ("tomllib", "load"): SymbolIdentity.TOMLLIB_LOAD,
+    ("tomllib", "loads"): SymbolIdentity.TOMLLIB_LOADS,
+    ("plistlib", "load"): SymbolIdentity.PLISTLIB_LOAD,
+    ("plistlib", "loads"): SymbolIdentity.PLISTLIB_LOADS,
+    ("ast", "literal_eval"): SymbolIdentity.AST_LITERAL_EVAL,
+}
+
+_MODULE_ATTRIBUTE_IDENTITIES = {
+    (SymbolIdentity.JSON_MODULE, "load"): SymbolIdentity.JSON_LOAD,
+    (SymbolIdentity.JSON_MODULE, "loads"): SymbolIdentity.JSON_LOADS,
+    (SymbolIdentity.PICKLE_MODULE, "load"): SymbolIdentity.PICKLE_LOAD,
+    (SymbolIdentity.PICKLE_MODULE, "loads"): SymbolIdentity.PICKLE_LOADS,
+    (SymbolIdentity.MARSHAL_MODULE, "load"): SymbolIdentity.MARSHAL_LOAD,
+    (SymbolIdentity.MARSHAL_MODULE, "loads"): SymbolIdentity.MARSHAL_LOADS,
+    (SymbolIdentity.TOMLLIB_MODULE, "load"): SymbolIdentity.TOMLLIB_LOAD,
+    (SymbolIdentity.TOMLLIB_MODULE, "loads"): SymbolIdentity.TOMLLIB_LOADS,
+    (SymbolIdentity.PLISTLIB_MODULE, "load"): SymbolIdentity.PLISTLIB_LOAD,
+    (SymbolIdentity.PLISTLIB_MODULE, "loads"): SymbolIdentity.PLISTLIB_LOADS,
+    (SymbolIdentity.AST_MODULE, "literal_eval"): SymbolIdentity.AST_LITERAL_EVAL,
+    (SymbolIdentity.UNITTEST_MODULE, "mock"): SymbolIdentity.MOCK_MODULE,
+    (SymbolIdentity.MOCK_MODULE, "patch"): SymbolIdentity.MOCK_PATCH,
+    (SymbolIdentity.MOCK_PATCH, "object"): SymbolIdentity.MOCK_PATCH_OBJECT,
+}
 
 
 class ScopeKind(str, Enum):
@@ -98,6 +191,33 @@ def _resolution_for_mask(kind_mask: int) -> ResolutionKind:
     return ResolutionKind.OPAQUE
 
 
+def _symbol_identity_for_mask(identity_mask: int) -> SymbolIdentity:
+    if identity_mask & _SYMBOL_IDENTITY_CONFLICT_BIT:
+        return SymbolIdentity.UNKNOWN
+    masked = identity_mask & ~_SYMBOL_IDENTITY_CONFLICT_BIT
+    if masked > 0 and masked & (masked - 1) == 0:
+        return _SYMBOL_IDENTITY_BY_BIT[masked]
+    return SymbolIdentity.UNKNOWN
+
+
+def _symbol_identity_for_module_import(module_name: str) -> SymbolIdentity:
+    if module_name == "mock":
+        return SymbolIdentity.MOCK_MODULE
+    if module_name == "unittest":
+        return SymbolIdentity.UNITTEST_MODULE
+    return _STDLIB_MODULE_IDENTITIES.get(module_name, SymbolIdentity.UNKNOWN)
+
+
+def _symbol_identity_for_import_from(module: str, symbol: str) -> SymbolIdentity:
+    if module in ("typing", "typing_extensions"):
+        return _TYPING_SYMBOL_IDENTITIES.get(symbol, SymbolIdentity.UNKNOWN)
+    if module in ("unittest.mock", "mock") and symbol == "patch":
+        return SymbolIdentity.MOCK_PATCH
+    if module == "unittest" and symbol == "mock":
+        return SymbolIdentity.MOCK_MODULE
+    return _STDLIB_FUNCTION_IDENTITIES.get((module, symbol), SymbolIdentity.UNKNOWN)
+
+
 @dataclass(frozen=True)
 class BindingSite:
     site_id: int
@@ -111,6 +231,8 @@ class BindingSite:
     direct_body: bool = False
     widened: bool = False
     origin_node_id: int = 0
+    symbol_identity: SymbolIdentity = SymbolIdentity.UNKNOWN
+    ambiguous_identity: bool = False
 
 
 @dataclass(frozen=True)
@@ -149,6 +271,9 @@ class Scope:
     binding_sites: List[BindingSite] = field(default_factory=list)
     binding_sites_by_name: Mapping[str, Tuple[BindingSite, ...]] = field(default_factory=dict)
     binding_resolution_by_name: Mapping[str, BindingResolutionIndex] = field(default_factory=dict)
+    symbol_identity_resolution_by_name: Mapping[str, BindingResolutionIndex] = field(
+        default_factory=dict
+    )
     children: List[int] = field(default_factory=list)
     predeclared_locals: Set[str] = field(default_factory=set)
 
@@ -223,6 +348,101 @@ class ScopeTree:
             return ResolutionKind.BUILTIN_OBJECT
         return ResolutionKind.OPAQUE
 
+    def resolve_symbol_identity(
+        self,
+        name: str,
+        scope_index: int,
+        use_line: int,
+        use_col: int = 0,
+    ) -> SymbolIdentity:
+        current = scope_index
+        origin_skips_class = self._origin_skips_class(scope_index)
+        while current >= 0:
+            scope = self.scopes[current]
+            if scope.kind == ScopeKind.CLASS and origin_skips_class and current != scope_index:
+                current = scope.parent_index
+                continue
+            record("name_site_lookups")
+            local_index = scope.symbol_identity_resolution_by_name.get(name)
+            if local_index is not None:
+                module_deferred = scope.kind == ScopeKind.MODULE and self._scope_in_function_body(
+                    scope_index
+                )
+                if module_deferred:
+                    identity_mask = local_index.complete_kind_mask()
+                else:
+                    identity_mask = local_index.kind_mask_before(use_line, use_col)
+                if identity_mask == 0:
+                    return SymbolIdentity.UNKNOWN
+                return _symbol_identity_for_mask(identity_mask)
+            current = scope.parent_index
+        return SymbolIdentity.UNKNOWN
+
+    def resolve_symbol_attribute(
+        self,
+        module_name: str,
+        attr: str,
+        scope_index: int,
+        use_line: int,
+        use_col: int = 0,
+    ) -> SymbolIdentity:
+        module_identity = self.resolve_symbol_identity(
+            module_name,
+            scope_index,
+            use_line,
+            use_col,
+        )
+        attribute_identity = _MODULE_ATTRIBUTE_IDENTITIES.get((module_identity, attr))
+        if attribute_identity is not None:
+            return attribute_identity
+        module_kind = self.resolve_name(module_name, scope_index, use_line, use_col)
+        if module_kind in (ResolutionKind.TYPING_MODULE, ResolutionKind.TYPING_EXT_MODULE):
+            return _TYPING_SYMBOL_IDENTITIES.get(attr, SymbolIdentity.UNKNOWN)
+        return SymbolIdentity.UNKNOWN
+
+    def resolve_simple_symbol_identity(
+        self,
+        expr: ast.expr,
+        scope_index: int,
+        use_line: int,
+        use_col: int = 0,
+    ) -> SymbolIdentity:
+        if isinstance(expr, ast.Name):
+            return self.resolve_symbol_identity(expr.id, scope_index, use_line, use_col)
+        if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
+            return self.resolve_symbol_attribute(
+                expr.value.id,
+                expr.attr,
+                scope_index,
+                use_line,
+                use_col,
+            )
+        return SymbolIdentity.UNKNOWN
+
+    def resolve_expression_symbol_identity(
+        self,
+        expr: ast.expr,
+        scope_index: int,
+        use_line: int,
+        use_col: int = 0,
+    ) -> SymbolIdentity:
+        if isinstance(expr, ast.Name):
+            return self.resolve_symbol_identity(expr.id, scope_index, use_line, use_col)
+        if isinstance(expr, ast.Attribute):
+            base_identity = self.resolve_expression_symbol_identity(
+                expr.value,
+                scope_index,
+                use_line,
+                use_col,
+            )
+            if base_identity is SymbolIdentity.UNKNOWN:
+                return SymbolIdentity.UNKNOWN
+            attribute_identity = _MODULE_ATTRIBUTE_IDENTITIES.get((base_identity, expr.attr))
+            if attribute_identity is not None:
+                return attribute_identity
+            return SymbolIdentity.UNKNOWN
+        return SymbolIdentity.UNKNOWN
+
     def _origin_skips_class(self, scope_index: int) -> bool:
         return self.scopes[scope_index].kind in (
             ScopeKind.FUNCTION,
@@ -267,6 +487,18 @@ class ScopeTree:
                 )
         return False
 
+    def is_resolved_no_type_check(
+        self,
+        node: ast.expr,
+        scope_index: int,
+    ) -> bool:
+        use_line = getattr(node, "lineno", 1)
+        use_col = getattr(node, "col_offset", 0)
+        return (
+            self.resolve_simple_symbol_identity(node, scope_index, use_line, use_col)
+            is SymbolIdentity.TYPING_NO_TYPE_CHECK
+        )
+
     def is_resolved_any_annotation(
         self, node: ast.AST, scope_index: int, use_line: int, use_col: int = 0
     ) -> bool:
@@ -294,13 +526,37 @@ class ScopeTree:
             == ResolutionKind.BUILTIN_OBJECT
         )
 
+    def resolve_mock_patch_call(
+        self,
+        node: ast.Call,
+        scope_index: int,
+    ) -> Optional[SymbolIdentity]:
+        use_line = getattr(node, "lineno", 1)
+        use_col = getattr(node, "col_offset", 0)
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in ("dict", "multiple", "stopall"):
+            return None
+        identity = self.resolve_expression_symbol_identity(func, scope_index, use_line, use_col)
+        if identity in (SymbolIdentity.MOCK_PATCH, SymbolIdentity.MOCK_PATCH_OBJECT):
+            return identity
+        return None
+
 
 def build_scope_tree(tree: ast.Module) -> ScopeTree:
     return _ScopeBuilder().build(tree)
 
 
-def _site_before_use(site: BindingSite, use_line: int, use_col: int) -> bool:
-    return site.line < use_line or (site.line == use_line and site.column < use_col)
+def _binding_conflicts_with_known_identity(
+    prior_sites: List[BindingSite],
+    binding_form: str,
+) -> bool:
+    if binding_form in (
+        BindingForm.GLOBAL.value,
+        BindingForm.NONLOCAL.value,
+        BindingForm.NONLOCAL_WRITE.value,
+    ):
+        return False
+    return any(site.symbol_identity is not SymbolIdentity.UNKNOWN for site in prior_sites)
 
 
 class _ScopeBuilder:
@@ -374,7 +630,27 @@ class _ScopeBuilder:
         value: Optional[ast.expr] = None,
         origin_node: Optional[ast.AST] = None,
         update_resolution: bool = True,
+        symbol_identity: SymbolIdentity = SymbolIdentity.UNKNOWN,
     ) -> BindingSite:
+        ambiguous_identity = False
+        prior_sites = self._sites_by_scope_name[scope_index].get(name, [])
+        if symbol_identity is not SymbolIdentity.UNKNOWN:
+            if prior_sites:
+                known_prior = [
+                    site.symbol_identity
+                    for site in prior_sites
+                    if site.symbol_identity is not SymbolIdentity.UNKNOWN
+                    and not site.ambiguous_identity
+                ]
+                if known_prior:
+                    if any(prior_identity is not symbol_identity for prior_identity in known_prior):
+                        ambiguous_identity = True
+                        symbol_identity = SymbolIdentity.UNKNOWN
+                elif any(site.binding_form != BindingForm.IMPORT.value for site in prior_sites):
+                    ambiguous_identity = True
+                    symbol_identity = SymbolIdentity.UNKNOWN
+        elif _binding_conflicts_with_known_identity(prior_sites, binding_form):
+            ambiguous_identity = True
         site = BindingSite(
             site_id=self._site_counter,
             name=name,
@@ -387,6 +663,8 @@ class _ScopeBuilder:
             direct_body=direct_body,
             widened=widened,
             origin_node_id=id(origin_node) if origin_node is not None else 0,
+            symbol_identity=symbol_identity,
+            ambiguous_identity=ambiguous_identity,
         )
         self._site_counter += 1
         self.scopes[scope_index].binding_sites.append(site)
@@ -425,6 +703,8 @@ class _ScopeBuilder:
         column: int,
         unconditional: bool,
         origin_node: ast.AST,
+        *,
+        symbol_identity: SymbolIdentity = SymbolIdentity.UNKNOWN,
     ) -> None:
         self._record_site(
             self._current,
@@ -436,6 +716,7 @@ class _ScopeBuilder:
             unconditional=unconditional,
             direct_body=self._direct_body(False),
             origin_node=origin_node,
+            symbol_identity=symbol_identity,
         )
 
     def _bind_shadow(
@@ -692,6 +973,14 @@ class _ScopeBuilder:
                     kind = ResolutionKind.TYPING_EXT_MODULE
                 else:
                     kind = ResolutionKind.OPAQUE
+                if alias.name == "unittest.mock":
+                    symbol_identity = (
+                        SymbolIdentity.MOCK_MODULE
+                        if alias.asname is not None
+                        else SymbolIdentity.UNITTEST_MODULE
+                    )
+                else:
+                    symbol_identity = _symbol_identity_for_module_import(alias.name)
                 self._bind_import(
                     bound,
                     kind,
@@ -699,10 +988,12 @@ class _ScopeBuilder:
                     node.col_offset,
                     unconditional,
                     node,
+                    symbol_identity=symbol_identity,
                 )
             return
 
         module = node.module or ""
+        relative_import = node.level > 0
         for alias in node.names:
             if alias.name == "*":
                 if module not in ("typing", "typing_extensions"):
@@ -714,6 +1005,12 @@ class _ScopeBuilder:
                         kind = ResolutionKind.ANY_TYPE
                     else:
                         kind = ResolutionKind.OPAQUE
+                    if relative_import:
+                        symbol_identity = SymbolIdentity.UNKNOWN
+                    else:
+                        symbol_identity = _TYPING_SYMBOL_IDENTITIES.get(
+                            symbol, SymbolIdentity.UNKNOWN
+                        )
                     self._bind_import(
                         symbol,
                         kind,
@@ -721,6 +1018,7 @@ class _ScopeBuilder:
                         node.col_offset,
                         unconditional,
                         node,
+                        symbol_identity=symbol_identity,
                     )
                 continue
             bound = alias.asname or alias.name
@@ -730,6 +1028,10 @@ class _ScopeBuilder:
                 kind = ResolutionKind.ANY_TYPE
             else:
                 kind = ResolutionKind.OPAQUE
+            if relative_import:
+                symbol_identity = SymbolIdentity.UNKNOWN
+            else:
+                symbol_identity = _symbol_identity_for_import_from(module, alias.name)
             self._bind_import(
                 bound,
                 kind,
@@ -737,6 +1039,7 @@ class _ScopeBuilder:
                 node.col_offset,
                 unconditional,
                 node,
+                symbol_identity=symbol_identity,
             )
 
     def _visit_try(self, node: ast.stmt) -> None:
@@ -1150,9 +1453,13 @@ class _ScopeBuilder:
         return None
 
     def _freeze_site_indexes(self) -> None:
-        for scope, by_name in zip(self.scopes, self._sites_by_scope_name):
+        for scope, by_name in zip(
+            self.scopes,
+            self._sites_by_scope_name,
+        ):
             frozen_sites: Dict[str, Tuple[BindingSite, ...]] = {}
             resolution_indexes: Dict[str, BindingResolutionIndex] = {}
+            symbol_identity_indexes: Dict[str, BindingResolutionIndex] = {}
             for name, sites in by_name.items():
                 ordered_sites = tuple(
                     sorted(sites, key=lambda site: (site.line, site.column, site.site_id))
@@ -1160,6 +1467,8 @@ class _ScopeBuilder:
                 frozen_sites[name] = ordered_sites
                 unconditional_masks = [0]
                 conditional_masks = [0]
+                identity_unconditional_masks = [0]
+                identity_conditional_masks = [0]
                 for site in ordered_sites:
                     unconditional = unconditional_masks[-1]
                     conditional = conditional_masks[-1]
@@ -1169,13 +1478,32 @@ class _ScopeBuilder:
                         conditional |= _RESOLUTION_KIND_BITS[site.kind]
                     unconditional_masks.append(unconditional)
                     conditional_masks.append(conditional)
+                    identity_unconditional = identity_unconditional_masks[-1]
+                    identity_conditional = identity_conditional_masks[-1]
+                    if site.ambiguous_identity:
+                        identity_unconditional |= _SYMBOL_IDENTITY_CONFLICT_BIT
+                        identity_conditional |= _SYMBOL_IDENTITY_CONFLICT_BIT
+                    elif site.symbol_identity is not SymbolIdentity.UNKNOWN:
+                        identity_bit = _SYMBOL_IDENTITY_BITS[site.symbol_identity]
+                        if site.unconditional:
+                            identity_unconditional |= identity_bit
+                        else:
+                            identity_conditional |= identity_bit
+                    identity_unconditional_masks.append(identity_unconditional)
+                    identity_conditional_masks.append(identity_conditional)
                 resolution_indexes[name] = BindingResolutionIndex(
                     positions=tuple((site.line, site.column) for site in ordered_sites),
                     unconditional_prefix_masks=tuple(unconditional_masks),
                     conditional_prefix_masks=tuple(conditional_masks),
                 )
+                symbol_identity_indexes[name] = BindingResolutionIndex(
+                    positions=tuple((site.line, site.column) for site in ordered_sites),
+                    unconditional_prefix_masks=tuple(identity_unconditional_masks),
+                    conditional_prefix_masks=tuple(identity_conditional_masks),
+                )
             scope.binding_sites_by_name = MappingProxyType(frozen_sites)
             scope.binding_resolution_by_name = MappingProxyType(resolution_indexes)
+            scope.symbol_identity_resolution_by_name = MappingProxyType(symbol_identity_indexes)
 
 
 def _is_try_node(node: ast.AST) -> bool:

@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 
+from tests._rulesets import ALL_RULES, DEFAULT_RULESET
 from typewitness import SourceFile, analyze
 from typewitness.models import Config
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RULESET = frozenset({"TW001", "TW002", "TW003"})
 PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 CORPUS_SIZE = 1000
 
 
 def _isolated_env() -> dict[str, str]:
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT / "src")
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(ROOT)])
     return env
 
 
@@ -203,3 +203,36 @@ def test_cross_version_corpus_finding_tuples_1000() -> None:
     left = json.loads(payloads[0])
     right = json.loads(payloads[1])
     assert left == right
+
+
+def test_cross_version_all_rules_fingerprint_equality() -> None:
+    script = ROOT / "tests" / "_fingerprint_digest_all_rules_runner.py"
+    digests: list[str] = []
+    compared_versions: list[str] = []
+    for version in PYTHON_VERSIONS:
+        completed = _run_isolated(version, script)
+        if completed.returncode == 72:
+            continue
+        assert completed.returncode == 0, completed.stderr
+        payload = json.loads(completed.stdout.strip())
+        codes = {entry[0] for entry in payload}
+        assert codes == set(ALL_RULES), sorted(codes)
+        digests.append(completed.stdout.strip())
+        compared_versions.append(version)
+    assert len(digests) >= 2, f"need at least two interpreters, found {compared_versions}"
+    assert len(set(digests)) == 1
+
+
+def test_cross_version_all_rules_corpus_finding_tuples() -> None:
+    script = ROOT / "tests" / "_corpus_finding_runner.py"
+    payloads: list[str] = []
+    for version in ("3.9", "3.14"):
+        completed = _run_isolated(version, script, "all-rules")
+        if completed.returncode == 72:
+            pytest.skip(f"Python {version} unavailable")
+        assert completed.returncode == 0, completed.stderr
+        tuples = json.loads(completed.stdout.strip())
+        codes = {entry[3] for entry in tuples}
+        assert codes == set(ALL_RULES), sorted(codes)
+        payloads.append(completed.stdout.strip())
+    assert payloads[0] == payloads[1]

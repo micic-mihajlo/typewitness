@@ -99,6 +99,12 @@ class SourceIndex:
         repr=False,
         compare=False,
     )
+    _safety_for_statement_cache: Dict[Tuple[int, int], Tuple[SafetyDirective, ...]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def char_offset(self, line: int, byte_column: int) -> int:
         if line < 1 or line > len(self.lines):
@@ -140,6 +146,10 @@ class SourceIndex:
         return self.logical_line_start.get(line, line)
 
     def safety_for_statement(self, start_line: int, end_line: int) -> Tuple[SafetyDirective, ...]:
+        cache_key = (start_line, end_line)
+        cached = self._safety_for_statement_cache.get(cache_key)
+        if cached is not None:
+            return cached
         directives: List[SafetyDirective] = []
         logical_end = self.logical_end_line(end_line)
         for line in range(start_line, logical_end + 1):
@@ -148,7 +158,9 @@ class SourceIndex:
         while prev_line >= 1 and prev_line in self.comment_only_lines:
             directives.extend(self.safety_by_logical_line.get(prev_line, ()))
             prev_line -= 1
-        return tuple(directives)
+        result = tuple(directives)
+        self._safety_for_statement_cache[cache_key] = result
+        return result
 
     def is_comment_only_line(self, line: int) -> bool:
         return line in self.comment_only_lines

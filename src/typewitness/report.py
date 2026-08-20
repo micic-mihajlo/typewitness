@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Sequence, Tuple
 
 from typewitness._version import tool_version
-from typewitness.models import VALID_RULE_CODES, AnalysisError, Finding
+from typewitness.catalog import DOCS_BASE_URL, RULE_DESCRIPTORS
+from typewitness.models import AnalysisError, Finding
 from typewitness.rules import RULES
 
 TOOL_NAME = "typewitness"
-DOCS_BASE_URL = "https://github.com/micic-mihajlo/typewitness"
 TOOL_VERSION = tool_version()
 JSON_SCHEMA = "typewitness-json-1"
 SARIF_VERSION = "2.1.0"
@@ -58,51 +58,41 @@ class RuleMetadata:
     experimental: bool
 
 
-_RULE_SUMMARIES: Dict[str, str] = {
-    "TW001": "A typing.cast call whose value argument is directly another cast.",
-    "TW002": "A resolved typing.cast call with no SAFETY evidence on its statement.",
-    "TW003": "A type: ignore comment missing error codes, SAFETY evidence, or both.",
-    "TW004": "A cast of a local name that was widened to Any or object from a literal.",
-}
-
-
-def _heading_anchor(heading: str) -> str:
-    slug = "".join(
-        char if (char.isalnum() or char in "-_") else ("-" if char == " " else "")
-        for char in heading.lower()
-    )
-    return slug
-
-
-def _help_uri_for_code(code: str) -> str:
-    anchors = {
-        "TW001": _heading_anchor("TW001 — no-chained-cast"),
-        "TW002": _heading_anchor("TW002 — cast-needs-evidence"),
-        "TW003": _heading_anchor("TW003 — typed-ignore-needs-evidence"),
-        "TW004": _heading_anchor("TW004 — no-widen-then-cast (experimental)"),
-    }
-    return f"{DOCS_BASE_URL}#{anchors[code]}"
-
-
 def _build_rule_metadata() -> Dict[str, RuleMetadata]:
     implemented = {rule.code: rule for rule in RULES}
     metadata: Dict[str, RuleMetadata] = {}
-    for code in sorted(VALID_RULE_CODES):
-        rule = implemented[code]
-        experimental = code == "TW004"
-        metadata[code] = RuleMetadata(
-            code=code,
+    for descriptor in RULE_DESCRIPTORS:
+        rule = implemented[descriptor.code]
+        metadata[descriptor.code] = RuleMetadata(
+            code=descriptor.code,
             name=rule.name,
-            summary=_RULE_SUMMARIES[code],
-            help_uri=_help_uri_for_code(code),
-            level="note" if experimental else "warning",
-            default_enabled=code in {"TW001", "TW002", "TW003"},
-            experimental=experimental,
+            summary=descriptor.summary,
+            help_uri=descriptor.help_uri,
+            level=descriptor.level,
+            default_enabled=descriptor.default_enabled,
+            experimental=descriptor.experimental,
         )
     return metadata
 
 
 RULE_METADATA: Dict[str, RuleMetadata] = _build_rule_metadata()
+
+__all__ = (
+    "DOCS_BASE_URL",
+    "JSON_SCHEMA",
+    "RULE_METADATA",
+    "Report",
+    "RuleMetadata",
+    "SARIF_SCHEMA_URI",
+    "SARIF_VERSION",
+    "TOOL_NAME",
+    "TOOL_VERSION",
+    "escape_text_output",
+    "render_errors_text",
+    "render_json",
+    "render_sarif",
+    "render_text",
+)
 
 
 @dataclass(frozen=True)

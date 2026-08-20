@@ -10,6 +10,7 @@ from typewitness.fingerprint import FingerprintTable
 from typewitness.models import Config, SourceFile
 from typewitness.scopes import ScopeTree
 from typewitness.source_index import SourceIndex
+from typewitness.typevars import TypeVarIndex
 
 
 @dataclass(frozen=True)
@@ -22,4 +23,5 @@ class AnalysisContext:
     candidates: CandidateSet
     fingerprints: FingerprintTable
     effects: EffectIndex | None
+    typevar_index: TypeVarIndex | None
     config: Config

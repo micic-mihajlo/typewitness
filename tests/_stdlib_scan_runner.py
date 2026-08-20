@@ -4,9 +4,8 @@ import sys
 from pathlib import Path
 
 from typewitness import SourceFile, analyze
+from typewitness.catalog import DEFAULT_RULESET
 from typewitness.models import Config
-
-DEFAULT_RULESET = frozenset({"TW001", "TW002", "TW003"})
 
 
 def _stdlib_py_files(limit: int) -> list[Path]:

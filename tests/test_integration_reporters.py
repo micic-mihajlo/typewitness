@@ -97,10 +97,10 @@ def test_rule_metadata_default_enabled_matches_the_core_ruleset() -> None:
         assert metadata.default_enabled is (code in DEFAULT_RULESET)
 
 
-def test_only_tw004_is_marked_experimental() -> None:
+def test_experimental_rule_metadata() -> None:
     experimental = {code for code, meta in RULE_METADATA.items() if meta.experimental}
 
-    assert experimental == {"TW004"}
+    assert experimental == {"TW004", "TW011", "TW012", "TW013"}
 
 
 def test_rule_metadata_levels() -> None:

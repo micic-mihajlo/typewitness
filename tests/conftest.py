@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import pathlib
 
+from tests._rulesets import ALL_RULES, DEFAULT_RULESET
 from typewitness import AnalysisResult, Config, Finding, SourceFile, analyze
 
-DEFAULT_RULESET = frozenset({"TW001", "TW002", "TW003"})
-ALL_RULES = DEFAULT_RULESET | frozenset({"TW004"})
+__all__ = [
+    "ALL_RULES",
+    "DEFAULT_RULESET",
+    "analyze_source",
+    "analyze_tw004",
+    "finding_at",
+    "finding_codes",
+]
 
 
 def analyze_source(

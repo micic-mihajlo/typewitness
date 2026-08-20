@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-SUPPRESSIBLE_RULE_CODES = frozenset({"TW002", "TW003", "TW004"})
+from typewitness.catalog import RULE_BY_CODE, SUPPRESSIBLE_RULE_CODES
 
 SAFETY_REASON_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 TYPE_IGNORE_RE = re.compile(
@@ -224,14 +224,19 @@ def safety_suppresses_rule(directive: SafetyDirective, rule_code: str) -> bool:
     return rule_code in directive.scoped_codes
 
 
+def evidence_suppresses_rule(directive: SafetyDirective, rule_code: str) -> bool:
+    descriptor = RULE_BY_CODE.get(rule_code)
+    if descriptor is None or not descriptor.suppressible:
+        return False
+    if descriptor.scoped_only_suppression and not directive.scoped_codes:
+        return False
+    return safety_suppresses_rule(directive, rule_code)
+
+
 def has_safety_reason(comment_text: str) -> bool:
     return parse_safety(comment_text) is not None
 
 
 def type_ignore_has_codes(comment_text: str) -> bool:
     parsed = parse_type_ignore(comment_text)
-    if parsed is None:
-        return False
-    if parsed.inline_safety_reason is not None:
-        return parsed.has_valid_codes
-    return parsed.has_valid_codes
+    return parsed is not None and parsed.has_valid_codes

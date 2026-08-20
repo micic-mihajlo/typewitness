@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 
 from typewitness import SourceFile, analyze
+from typewitness.catalog import DEFAULT_RULESET, VALID_RULE_CODES
 from typewitness.models import Config
 
-DEFAULT_RULESET = frozenset({"TW001", "TW002", "TW003"})
+ALL_RULES = VALID_RULE_CODES
 
 
 def _stdlib_root() -> Path:
@@ -61,12 +62,57 @@ def _synthetic_corpus(count: int) -> list[tuple[str, str]]:
 
 FindingTuple = tuple[str, int, int, str, str]
 
+ALL_RULES_FIXTURE_TEXT = """# mypy: ignore-errors
+from typing import Any, TypeGuard, TypeVar, cast, no_type_check
+import json
+from unittest.mock import patch
 
-def _findings_for_source(relpath: str, path: Path, text: str) -> list[FindingTuple]:
+untyped = 1  # type: ignore[assignment]
+erased = cast(Any, payload)
+cast(int, orphan)
+chained = cast(int, cast(str, raw))
+
+
+def widen_then_cast():
+    w: Any = [1, 2]
+    return cast(list, w)
+
+
+@no_type_check
+def unchecked():
+    return 1
+
+
+patch("pkg.mod.target", create=True)
+
+
+def is_str(x: object) -> TypeGuard[str]:
+    return True
+
+
+parsed = cast(dict[str, int], json.loads(raw))
+projected = cast(str, json.loads(raw)["key"])
+patch("pkg.mod.other")
+
+T = TypeVar("T")
+
+
+def generic(x):
+    return cast(T, x)
+"""
+
+
+def _findings_for_source(
+    relpath: str,
+    path: Path,
+    text: str,
+    *,
+    select: frozenset[str] = DEFAULT_RULESET,
+) -> list[FindingTuple]:
     try:
         result = analyze(
             SourceFile(path=path, text=text),
-            config=Config(select=DEFAULT_RULESET, ignore=frozenset()),
+            config=Config(select=select, ignore=frozenset()),
         )
     except Exception:
         return []
@@ -82,6 +128,15 @@ def _findings_for_source(relpath: str, path: Path, text: str) -> list[FindingTup
         )
         for finding in result.findings
     ]
+
+
+def _all_rules_finding_tuples() -> list[FindingTuple]:
+    return _findings_for_source(
+        "synthetic/all_rules_fixture.py",
+        Path("synthetic/all_rules_fixture.py"),
+        ALL_RULES_FIXTURE_TEXT,
+        select=ALL_RULES,
+    )
 
 
 def _finding_tuples_for_manifest(manifest: dict[str, object]) -> list[FindingTuple]:
@@ -121,6 +176,8 @@ if __name__ == "__main__":
     elif mode == "manifest":
         manifest = json.loads(sys.stdin.read())
         print(json.dumps(_finding_tuples_for_manifest(manifest)))
+    elif mode == "all-rules":
+        print(json.dumps(_all_rules_finding_tuples()))
     else:
         relpaths = _relative_stdlib_paths(int(mode))
         manifest = {"stdlib": relpaths, "synthetic": []}

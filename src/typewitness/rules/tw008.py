@@ -9,15 +9,13 @@ from typewitness.rules._finding_helpers import candidate_finding, statement_safe
 
 
 @dataclass(frozen=True)
-class CastNeedsEvidenceRule:
-    code: str = "TW002"
-    name: str = "cast-needs-evidence"
+class NoTypeCheckNeedsEvidenceRule:
+    code: str = "TW008"
+    name: str = "no-type-check-needs-evidence"
 
     def check(self, context: AnalysisContext) -> Tuple[Finding, ...]:
         findings: List[Finding] = []
-        for candidate in context.candidates.cast_candidates:
-            if candidate.is_chain_child:
-                continue
+        for candidate in context.candidates.no_type_check_candidates:
             if statement_safety_suppresses(context, candidate, self.code):
                 continue
             findings.append(
@@ -25,7 +23,7 @@ class CastNeedsEvidenceRule:
                     context,
                     candidate,
                     code=self.code,
-                    message="cast call missing SAFETY evidence",
+                    message="no_type_check decorator missing SAFETY evidence",
                 )
             )
         return tuple(findings)

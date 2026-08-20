@@ -120,7 +120,7 @@ Each `Finding` is a frozen dataclass:
 
 | Field | Meaning |
 | --- | --- |
-| `code` | `"TW001"` … `"TW004"` |
+| `code` | `"TW001"` … `"TW013"` |
 | `path` | the `SourceFile` path, unchanged |
 | `range` | `SourceRange` of `SourceLocation(line, column)`; 1-based lines, 0-based UTF-8-corrected character columns |
 | `message` | short human-readable description |
@@ -161,7 +161,11 @@ findings — the overwhelming majority — are unaffected by their neighbours.
 
 ## Rules
 
-`TW001`, `TW002`, and `TW003` are on by default. `TW004` is experimental and opt-in.
+`TW001`, `TW002`, `TW003`, `TW005`, `TW006`, `TW007`, `TW008`, `TW009`, and `TW010` are on by default.
+`TW004`, `TW011`, `TW012`, and `TW013` are experimental and opt-in.
+Enable opt-in rules through `Config(select=...)` or the CLI's `--select`; see
+[Configuration](#configuration). Suppression requirements are centralized in
+[Suppression](#suppression).
 
 A `cast` call is only considered when its shape is unambiguous: exactly one type argument and one
 value argument, positionally or as `typ=` / `val=`. Anything else — extra positionals, `*args`,
@@ -179,6 +183,9 @@ value = cast(int, helper(cast(str, raw)))  # not a chain: the inner cast is an a
 
 TW001 cannot be suppressed. See [Suppression](#suppression).
 
+Source rationale: [typing.cast](https://docs.python.org/3/library/typing.html#typing.cast) is a
+type-checker directive; nesting casts usually means the inner annotation was already wrong.
+
 ### TW002 — cast-needs-evidence
 
 A resolved `cast` call with no `SAFETY` evidence attached to its statement. A cast that is a chain
@@ -191,6 +198,9 @@ value = cast(int, payload)  # SAFETY: validated upstream   # ok
 # SAFETY: validated upstream
 value = cast(int, payload)  # ok
 ```
+
+Source rationale: [typing.cast](https://docs.python.org/3/library/typing.html#typing.cast) does not
+validate at runtime; a comment records why the checker should trust the annotation.
 
 ### TW003 — typed-ignore-needs-evidence
 
@@ -214,6 +224,9 @@ Recognition matches mypy's: a single `#`, lowercase `type: ignore`, optional bra
 Occurrences inside strings and docstrings are never directives — the file is tokenized, not
 scanned. Each code must match `[\w-]+`.
 
+Source rationale: [mypy `# type: ignore`](https://mypy.readthedocs.io/en/stable/common_issues.html#disabling-a-type-check-error-on-a-line)
+requires explicit error codes so suppressions stay narrow and auditable.
+
 ### TW004 — no-widen-then-cast (experimental)
 
 A `cast` of a local name that was annotated `Any` or `object` and initialized from a literal
@@ -229,12 +242,6 @@ def load():
     return cast(list, widened)  # TW004
 ```
 
-Enable it explicitly:
-
-```python
-Config(select=frozenset({"TW001", "TW002", "TW003", "TW004"}))
-```
-
 TW004 is deliberately narrow. The binding must be the name's only binding site in the function,
 must be a direct, unconditional `AnnAssign` in the function body, and must resolve to a literal
 (constants, signed numbers, and lists/tuples/sets/dicts of literals), optionally through a chain of
@@ -244,6 +251,252 @@ non-literal initializer all disqualify it. It never crosses a function boundary.
 
 It is marked experimental because its evidence model is the newest and the narrowest part of the
 analyzer; treat findings as advisory and pin the ruleset if you depend on stable output.
+
+Source rationale: [typing.Any](https://docs.python.org/3/library/typing.html#typing.Any) is
+compatible with every type, so a literal widened to `Any` and immediately re-narrowed with `cast`
+usually signals a checker workaround rather than a real runtime check.
+
+### TW005 — cast-to-any
+
+A resolved `cast` whose type argument resolves to `typing.Any` or `typing_extensions.Any`. This is
+type erasure, not narrowing.
+
+```python
+from typing import Any, cast
+
+value = cast(Any, payload)  # TW005
+value = cast(int, payload)  # not TW005
+```
+
+Source rationale: [typing.cast](https://docs.python.org/3/library/typing.html#typing.cast) to
+`Any` erases static information without runtime validation.
+
+### TW006 — discarded-cast
+
+A resolved `cast` that is the entire value of an expression statement, so its result is discarded.
+
+```python
+from typing import cast
+
+cast(int, payload)  # TW006
+x = cast(int, payload)  # not TW006
+return cast(int, payload)  # not TW006
+```
+
+Source rationale: [typing.cast](https://docs.python.org/3/library/typing.html#typing.cast) returns
+its second argument unchanged at runtime, so a standalone expression statement cannot affect types or
+values.
+
+### TW007 — checker-disable-needs-evidence
+
+A scope-wide mypy or pyright weakening directive at column 0 anywhere in the module
+with no immediately preceding comment-only `SAFETY` evidence. Recognized forms are exact
+and case-sensitive:
+
+```python
+# mypy: ignore-errors
+# mypy: disable-error-code=assignment,misc
+# pyright: basic
+# pyright: standard
+# pyright: reportGeneralTypeIssues=false
+```
+
+```python
+# SAFETY: vendored stubs incomplete
+# mypy: ignore-errors
+import x  # ok
+
+# mypy: ignore-errors
+import x  # TW007
+
+
+import y
+
+# mypy: ignore-errors
+import z  # TW007
+```
+
+TW007 does not cover bare `# type: ignore` (TW003), `# noqa`, `# ruff:`, line-level pyright
+ignores, or inline `SAFETY:` on the directive line itself.
+
+Source rationale: [mypy inline configuration](https://mypy.readthedocs.io/en/stable/config_file.html#confval-disable_error_code)
+and [Pyright file-level comments](https://microsoft.github.io/pyright/#/comments?id=file-level-diagrams)
+weaken checking for an entire scope and should carry an explicit audit trail.
+
+### TW008 — no-type-check-needs-evidence
+
+A resolved `@no_type_check` decorator on a function, async function, or class with no `SAFETY`
+evidence on the decorator's logical line or the comment-only run directly above it.
+
+```python
+from typing import no_type_check
+
+
+@no_type_check
+def f(): ...  # TW008
+
+
+# SAFETY: legacy untyped module
+@no_type_check
+def f(): ...  # ok
+
+
+@no_type_check()  # not TW008 — call form is ignored
+def f(): ...
+```
+
+Source rationale: [typing.no_type_check](https://docs.python.org/3/library/typing.html#typing.no_type_check)
+opts an entire callable or class out of static checking and should be documented like any other
+scope-wide waiver.
+
+### TW009 — mock-patch-create-needs-evidence
+
+A resolved `unittest.mock.patch` or `patch.object` call with literal `create=True` and no `SAFETY`
+evidence on its logical statement. `create=False`, a non-literal `create=` value, `patch.dict`,
+`patch.multiple`, unresolved names (including pytest `mocker` fixtures), shadowed imports, and
+relative imports are all silent.
+
+```python
+from unittest.mock import patch
+
+patch("pkg.mod.target", create=True)  # TW009
+patch.object(obj, "attr", create=True)  # TW009
+
+patch("pkg.mod.target", create=False)  # not TW009
+patch("pkg.mod.target", create=flag)  # not TW009 — not a literal True
+patch.dict("pkg.mod", {"a": 1}, create=True)  # not TW009
+```
+
+When `create=True` is used without an explicit mock fidelity keyword, TW012 may also report on the
+same call. That double report is intentional: `create=True` fabricates attributes the real target
+may not have, while missing `autospec`/`spec`/`spec_set`/`new`/`new_callable`/`wraps` leaves mock
+behavior unconstrained.
+
+Source rationale: [Python `unittest.mock.patch`](https://docs.python.org/3/library/unittest.mock.html#unittest.mock.patch)
+documents `create=True` as creating the attribute when it does not exist — a test can pass against
+APIs that were never implemented.
+
+### TW010 — constant-type-guard
+
+A function or async function whose return annotation resolves to `typing.TypeGuard` or
+`typing.TypeIs`, and whose body — after an optional docstring — consists of exactly one statement:
+`return True` or `return False`. A narrowing function with a constant verdict cannot establish its
+claimed runtime evidence.
+
+```python
+from typing import TypeGuard
+
+
+def is_str(x: object) -> TypeGuard[str]:
+    return True  # TW010
+
+
+def is_str(x: object) -> TypeGuard[str]:
+    return isinstance(x, str)  # not TW010
+
+
+def is_str(x: object) -> TypeGuard[str]:
+    assert x is not None
+    return True  # not TW010 — more than one statement
+```
+
+TW010 is deliberately narrow. It does not infer through branches, `try`/`except`, assertions,
+generators, or nested scopes. It stays silent for `@overload` groups, `Protocol` methods, stub
+bodies (`...`), explicit string annotations, shadowed imports, and any body that is not exactly one
+literal boolean return.
+
+`from __future__ import annotations` does not silence TW010; postponed evaluation still leaves a
+normal `TypeGuard[...]` / `TypeIs[...]` AST on the return annotation.
+
+Source rationale: [typing.TypeGuard](https://docs.python.org/3/library/typing.html#typing.TypeGuard)
+and [typing.TypeIs](https://docs.python.org/3/library/typing.html#typing.TypeIs) narrow types only
+when the function's runtime logic supports the claim.
+
+### TW011 — unvalidated-boundary-cast (experimental)
+
+A resolved `cast` whose value is an allowlisted stdlib boundary parser call, or only
+`Attribute`/`Subscript` projections rooted directly at that call, and whose target is not `Any` or
+builtin `object`. An intervening call such as `validate(json.loads(...))` is not flagged.
+
+```python
+import json
+from typing import Any, cast
+
+x = cast(dict[str, int], json.loads(raw))  # TW011
+x = cast(Any, json.loads(raw))  # not TW011 — target is Any
+x = cast(dict[str, int], validate(json.loads(raw)))  # not TW011 — intervening call
+x = cast(str, json.loads(raw)["key"])  # TW011 — subscript projection on the parse call
+x = cast(list[str], json.loads(raw).keys())  # not TW011 — method call on the parse result
+```
+
+The initial allowlist covers `json.load`/`loads`, `pickle.load`/`loads`, `marshal.load`/`loads`,
+`tomllib.load`/`loads`, `plistlib.load`/`loads`, and `ast.literal_eval`, resolved through the same
+fail-closed `SymbolIdentity` channel as the rest of the analyzer.
+
+Source rationale: [json.loads](https://docs.python.org/3/library/json.html#json.loads) returns
+untrusted data; [Pyre's safe JSON guidance](https://pyre-check.org/docs/safe-json) treats parsing
+and validation as separate steps that `cast` must not substitute for.
+
+### TW012 — mock-patch-needs-spec (experimental)
+
+A resolved `patch` or `patch.object` call that makes no explicit mock fidelity decision. Presence
+of any of `autospec`, `spec`, `spec_set`, `new`, `new_callable`, or `wraps` exempts the call
+regardless of value, matching OpenStack
+[H210](https://docs.openstack.org/hacking/latest/user/hacking.html#h210-require-autospec-spec-or-spec-set-in-mock-patch-or-mock-patch-object-calls)'s
+conscious-decision policy. Positional `new` also exempts: the second argument to `patch(target,
+new, …)` and the third to `patch.object(target, attribute, new, …)`. Any `**kwargs` splat stays
+silent because a decision may be supplied dynamically. `patch.dict`, `patch.multiple`, `Mock()`
+construction, monkeypatch, and unresolved or shadowed names stay silent.
+
+Qualified imports resolve through nested attributes: `import unittest.mock` binds `unittest` (not
+`mock`), so `unittest.mock.patch(...)` and `unittest.mock.patch.object(...)` resolve, while bare
+`unittest.patch(...)` stays silent.
+
+```python
+from unittest.mock import patch
+
+patch("pkg.mod.target")  # TW012
+patch("pkg.mod.target", autospec=False)  # not TW012 — autospec was chosen explicitly
+patch("pkg.mod.target", spec=object)  # not TW012
+patch("pkg.mod.target", mock_obj)  # not TW012 — positional new
+patch("pkg.mod.target", **kwargs)  # not TW012 — kwargs may carry spec dynamically
+patch("pkg.mod.target", create=True)  # TW009 and TW012 when both are enabled
+
+import unittest.mock
+
+unittest.mock.patch("pkg.mod.target")  # TW012
+unittest.patch("pkg.mod.target")  # not TW012 — unittest has no patch attribute
+```
+
+Unscoped or scoped `SAFETY` evidence suppresses TW012 the same way as TW009.
+
+Source rationale: H210 and the mock docs treat an explicit fidelity keyword as proof the author
+considered how tightly the mock should mirror the real object. TypeWitness applies the same
+presence-only rule and deliberately does not judge whether `autospec=False` is a good idea.
+
+### TW013 — cast-to-typevar (experimental)
+
+A resolved `cast` whose bare `Name` target is a locally bound `TypeVar` from a single
+unconditional `T = TypeVar(...)` assignment. Subscripted targets such as `list[T]`, string targets,
+imported `TypeVar` names, conditional or reassigned bindings, `NewType`, `ParamSpec`, and unknown
+aliases stay silent. There is no cross-file inference and no PEP 695 requirement in this release.
+
+```python
+from typing import TypeVar, cast
+
+T = TypeVar("T")
+
+
+def f(x):
+    return cast(T, x)  # TW013
+
+
+x = cast(int, payload)  # not TW013
+x = cast(list[T], payload)  # not TW013
+```
+
+Source rationale: [typing.cast](https://docs.python.org/3/library/typing.html#typing.cast) to a bare
+`TypeVar` name usually papers over a generic boundary the checker cannot prove locally.
 
 ## Suppression
 
@@ -282,8 +535,9 @@ suppresses everything suppressible.
 value = cast(int, cast(str, raw))  # SAFETY[TW002]: reviewed conversion   # TW001 still reported
 ```
 
-Only `TW002`, `TW003`, and `TW004` are suppressible. `TW001` is not: a chained cast is a structural
-finding, not a judgement call, so no comment silences it.
+Only `TW002`, `TW003`, `TW004`, `TW005`, `TW006`, `TW007`, `TW008`, `TW009`, `TW010`, `TW011`,
+`TW012`, and `TW013` are suppressible. `TW001` is not: a chained cast is a structural finding, not
+a judgement call, so no comment silences it.
 
 **Fail-closed scopes.** A malformed scope list invalidates the entire directive, which then
 suppresses nothing at all — not even the rules it named correctly. `SAFETY[TW001]`,
@@ -294,16 +548,26 @@ malformed. So this line reports both TW001 *and* TW002:
 value = cast(int, cast(str, raw))  # SAFETY[TW001]: reviewed conversion
 ```
 
-**TW004 requires an explicit scope.** Unlike TW002 and TW003, TW004 is only suppressed by a
-directive that names it. A bare `# SAFETY: …` does not silence it — the widen-then-cast shape is
-usually not what the author was documenting.
+**TW004, TW005, TW006, TW010, TW011, and TW013 require an explicit scope.** Unlike TW002 and
+TW003, these rules are only suppressed by a directive that names them. A bare `# SAFETY: …` does not
+silence them.
 
 ```python
 return cast(list, widened)  # SAFETY[TW004]: reviewed narrowing
+value = cast(Any, payload)  # SAFETY[TW005]: reviewed erasure
+cast(int, payload)  # SAFETY[TW006]: intentional no-op
+
+
+def is_str(x: object) -> TypeGuard[str]:  # SAFETY[TW010]: reviewed guard
+    return True
+
+
+x = cast(dict[str, int], json.loads(raw))  # SAFETY[TW011]: schema validated upstream
+x = cast(T, payload)  # SAFETY[TW013]: reviewed generic cast
 ```
 
-Note that `SAFETY[TW004]` no longer covers TW002 on that statement; list both codes if you need
-both.
+Note that a scoped directive no longer covers other rules on that statement; list every code you
+need.
 
 ### Evidence on a `type: ignore` comment
 
@@ -330,11 +594,29 @@ above — it attaches to the statement and satisfies TW003 the same way.
 ```python
 from typewitness import Config
 
-Config()  # TW001, TW002, TW003
+Config()  # TW001, TW002, TW003, TW005, TW006, TW007, TW008, TW009, TW010
 Config(select=frozenset({"TW002"}))  # TW002 only
-Config(ignore=frozenset({"TW003"}))  # TW001, TW002
+Config(ignore=frozenset({"TW003"}))  # TW001, TW002, TW005, TW006, TW007, TW008, TW009, TW010
 Config(select=frozenset())  # nothing runs; findings is always empty
-Config(select=frozenset({"TW001", "TW002", "TW003", "TW004"}))  # everything
+Config(
+    select=frozenset(
+        {
+            "TW001",
+            "TW002",
+            "TW003",
+            "TW004",
+            "TW005",
+            "TW006",
+            "TW007",
+            "TW008",
+            "TW009",
+            "TW010",
+            "TW011",
+            "TW012",
+            "TW013",
+        }
+    )
+)  # everything
 ```
 
 `select=None` means the default ruleset. An explicit `select` replaces it, including the empty
@@ -362,8 +644,16 @@ Enabling or disabling a rule never changes another rule's fingerprints.
 
   But a shim whose branches bind *different* kinds — an import in one, a local `def cast` in the
   other — collapses to opaque, and casts through that name are silently skipped.
-- **TW004 is experimental.** Its rule identity and message may change; see above for its
-  eligibility conditions.
+- **TW004, TW011, TW012, and TW013 are experimental.** Their rule identity and message may change; see
+  above for their eligibility conditions.
+- **Narrowing and cast rules share candidate traversals.** TW010 reads `narrowing-function`
+  candidates; TW013 reuses `cast-call` candidates and a lazily built TypeVar index derived from the
+  binding census. Enabling one never adds a per-rule AST walk.
+- **Mock patch rules share one candidate traversal.** TW009 and TW012 read the same
+  `mock-patch-call` candidates built during the single AST walk. Enabling one never changes the
+  other's fingerprints or those of earlier rules.
+- **TW009 and TW012 can double-report.** A literal `create=True` call with no fidelity keyword
+  triggers TW009 (default) and TW012 (experimental) independently when both are selected.
 - **Evidence ownership is statement-level, not candidate-level.** One `SAFETY` comment covers every
   candidate in its logical statement. This is a real precision loss for statements containing
   several casts, and it is intentional: comment-to-expression attachment is not something Python's

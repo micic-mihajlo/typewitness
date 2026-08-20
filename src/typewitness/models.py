@@ -4,8 +4,7 @@ import pathlib
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-VALID_RULE_CODES = frozenset({"TW001", "TW002", "TW003", "TW004"})
-DEFAULT_RULESET = frozenset({"TW001", "TW002", "TW003"})
+from typewitness.catalog import DEFAULT_RULESET, VALID_RULE_CODES
 
 
 def _validate_rule_codes(codes: frozenset[str], field_name: str) -> None:
@@ -80,3 +79,16 @@ class Config:
     def resolved_select(self) -> frozenset[str]:
         base = DEFAULT_RULESET if self.select is None else self.select
         return base - self.ignore
+
+
+__all__ = (
+    "AnalysisError",
+    "AnalysisResult",
+    "Config",
+    "DEFAULT_RULESET",
+    "Finding",
+    "SourceFile",
+    "SourceLocation",
+    "SourceRange",
+    "VALID_RULE_CODES",
+)

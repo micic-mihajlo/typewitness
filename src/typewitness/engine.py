@@ -5,6 +5,10 @@ from typing import Optional, Tuple
 
 from typewitness.candidate_ref import CandidateRef
 from typewitness.candidates import build_candidates, build_parent_map
+from typewitness.catalog import (
+    active_rules_require_effect_index,
+    active_rules_require_typevar_index,
+)
 from typewitness.context import AnalysisContext
 from typewitness.effects import build_effect_index
 from typewitness.fingerprint import build_fingerprint_table
@@ -22,6 +26,7 @@ from typewitness.source_index import (
     normalize_source_text,
     preflight_encode_error,
 )
+from typewitness.typevars import build_typevar_index
 
 
 def _finding_sort_key(finding: Finding) -> Tuple[str, int, int, str, str]:
@@ -79,16 +84,11 @@ def analyze(source: SourceFile, config: Optional[Config] = None) -> AnalysisResu
         scope_paths: list[str] = []
         candidate_norms: list[str] = []
         host_norms: list[str] = []
-        for cast_candidate in candidates.cast_candidates:
-            refs.append(cast_candidate.ref)
-            scope_paths.append(cast_candidate.scope_path)
-            candidate_norms.append(cast_candidate.candidate_norm)
-            host_norms.append(cast_candidate.host_norm)
-        for ignore_candidate in candidates.ignore_candidates:
-            refs.append(ignore_candidate.ref)
-            scope_paths.append(ignore_candidate.scope_path)
-            candidate_norms.append(ignore_candidate.candidate_norm)
-            host_norms.append(ignore_candidate.host_norm)
+        for candidate in candidates.fingerprint_candidates():
+            refs.append(candidate.ref)
+            scope_paths.append(candidate.scope_path)
+            candidate_norms.append(candidate.candidate_norm)
+            host_norms.append(candidate.host_norm)
         fingerprints = build_fingerprint_table(
             path=source.path,
             refs=refs,
@@ -96,7 +96,16 @@ def analyze(source: SourceFile, config: Optional[Config] = None) -> AnalysisResu
             candidate_norms=candidate_norms,
             host_norms=host_norms,
         )
-        effects = build_effect_index(scope_tree) if "TW004" in active_rules else None
+        effects = (
+            build_effect_index(scope_tree)
+            if active_rules_require_effect_index(active_rules)
+            else None
+        )
+        typevar_index = (
+            build_typevar_index(scope_tree)
+            if active_rules_require_typevar_index(active_rules)
+            else None
+        )
     except RecursionError as exc:
         return AnalysisResult(
             findings=(),
@@ -130,6 +139,7 @@ def analyze(source: SourceFile, config: Optional[Config] = None) -> AnalysisResu
         candidates=candidates,
         fingerprints=fingerprints,
         effects=effects,
+        typevar_index=typevar_index,
         config=active_config,
     )
 

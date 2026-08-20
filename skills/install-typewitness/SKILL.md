@@ -38,7 +38,7 @@ Add TypeWitness as a development dependency and integrate it with the repository
 
      The shipped hook passes filenames; do not add `--staged`, `--worktree`, or `--diff-ref` to hook args.
    - When no shared check command exists, document or wire a minimal `typewitness` invocation from the project root that contains `pyproject.toml`.
-   - Keep `[tool.typewitness]` unset unless the repository needs excludes, rule selection, or baseline files. Defaults are TW001, TW002, and TW003.
+   - Keep `[tool.typewitness]` unset unless the repository needs excludes, rule selection, or baseline files. Defaults are TW001, TW002, TW003, TW005, TW006, TW007, TW008, TW009, and TW010.
 
 4. Validate through the repository's normal command, not a one-off ad hoc invocation when a standard check exists. Report findings; do not auto-fix violations, add suppressions, weaken rules, or rewrite unrelated code to make TypeWitness pass.
 

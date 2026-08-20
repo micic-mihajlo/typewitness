@@ -9,14 +9,14 @@ from typewitness.rules._finding_helpers import candidate_finding, statement_safe
 
 
 @dataclass(frozen=True)
-class CastNeedsEvidenceRule:
-    code: str = "TW002"
-    name: str = "cast-needs-evidence"
+class MockPatchCreateNeedsEvidenceRule:
+    code: str = "TW009"
+    name: str = "mock-patch-create-needs-evidence"
 
     def check(self, context: AnalysisContext) -> Tuple[Finding, ...]:
         findings: List[Finding] = []
-        for candidate in context.candidates.cast_candidates:
-            if candidate.is_chain_child:
+        for candidate in context.candidates.mock_patch_candidates:
+            if not candidate.has_literal_create_true:
                 continue
             if statement_safety_suppresses(context, candidate, self.code):
                 continue
@@ -25,7 +25,7 @@ class CastNeedsEvidenceRule:
                     context,
                     candidate,
                     code=self.code,
-                    message="cast call missing SAFETY evidence",
+                    message="mock patch call with create=True missing SAFETY evidence",
                 )
             )
         return tuple(findings)

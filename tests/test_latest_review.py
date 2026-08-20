@@ -431,6 +431,138 @@ def test_same_host_ignore_normalization_scales_near_linearly() -> None:
     assert measurements[-1][1] / measurements[0][1] <= 48
 
 
+def test_tw010_respects_class_body_type_guard_shadowing() -> None:
+    text = "\n".join(
+        [
+            "from typing import TypeGuard",
+            "class C:",
+            "    TypeGuard = int",
+            "    def is_str(self, x: object) -> TypeGuard[str]:",
+            "        return True",
+        ]
+    )
+    result = analyze_source(text)
+    assert "TW010" not in finding_codes(result)
+
+
+def _dense_typeguard_module(size: int) -> str:
+    lines = ["from typing import TypeGuard"]
+    for index in range(size):
+        lines.extend(
+            [
+                f"def guard_{index}(x: object) -> TypeGuard[str]:",
+                "    return True",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _measure_dense_typeguard_analysis(size: int) -> tuple[dict[str, int], float]:
+    from typewitness._instrumentation import disable, reset, snapshot
+
+    source = _dense_typeguard_module(size)
+    samples: list[float] = []
+    counts: dict[str, int] = {}
+    for _ in range(3):
+        reset()
+        started = time.perf_counter()
+        result = analyze_source(source)
+        assert finding_codes(result).count("TW010") == size
+        samples.append(time.perf_counter() - started)
+        counts = snapshot()
+    disable()
+    return counts, statistics.median(samples)
+
+
+def test_dense_typeguard_overloads_scale_near_linearly() -> None:
+    measurements = [_measure_dense_typeguard_analysis(size) for size in (250, 500, 1000, 2000)]
+    for (previous_counts, previous_time), (counts, elapsed) in zip(
+        measurements,
+        measurements[1:],
+    ):
+        for operation in ("name_site_lookups", "name_site_steps"):
+            ratio = counts[operation] / previous_counts[operation]
+            assert ratio <= 2.35, (operation, ratio, previous_counts, counts)
+        assert elapsed / previous_time <= 3.25, (previous_time, elapsed)
+
+
+def _dense_safety_comment_cast_module(comment_lines: int, cast_count: int) -> str:
+    lines = ["from typing import cast"]
+    for index in range(comment_lines):
+        lines.append(f"# note {index}")
+    for index in range(cast_count):
+        lines.append(f"x_{index} = cast(int, {index})")
+    return "\n".join(lines) + "\n"
+
+
+def test_safety_for_statement_lookup_is_memoized_for_shared_hosts() -> None:
+    source = "\n".join(
+        [
+            "# SAFETY: reviewed cast evidence here",
+            "from typing import cast",
+            "x = cast(int, 1)",
+        ]
+    )
+    index = build_source_index(source)
+    first = index.safety_for_statement(3, 3)
+    second = index.safety_for_statement(3, 3)
+    assert first is second
+    assert (3, 3) in index._safety_for_statement_cache
+
+
+def _dense_typevar_module(size: int) -> str:
+    lines = ["from typing import TypeVar, cast"]
+    for index in range(size):
+        lines.append(f"T_{index} = TypeVar('T_{index}')")
+        lines.append(f"x_{index} = cast(T_{index}, payload)")
+    return "\n".join(lines) + "\n"
+
+
+def _measure_typevar_index_build(size: int) -> tuple[dict[str, int], float]:
+    from typewitness._instrumentation import disable, reset, snapshot
+    from typewitness.typevars import build_typevar_index
+
+    source = _dense_typevar_module(size)
+    normalized = normalize_source_text(source)
+    tree = ast.parse(normalized)
+    scope_tree = build_scope_tree(tree)
+    samples: list[float] = []
+    counts: dict[str, int] = {}
+    for _ in range(3):
+        reset()
+        started = time.perf_counter()
+        build_typevar_index(scope_tree)
+        samples.append(time.perf_counter() - started)
+        counts = snapshot()
+    disable()
+    return counts, statistics.median(samples)
+
+
+def test_typevar_index_build_scales_near_linearly() -> None:
+    measurements = [_measure_typevar_index_build(size) for size in (250, 500, 1000, 2000)]
+    for (previous_counts, _), (counts, _) in zip(
+        measurements,
+        measurements[1:],
+    ):
+        ratio = counts["name_site_lookups"] / previous_counts["name_site_lookups"]
+        assert ratio <= 2.35, (ratio, previous_counts, counts)
+
+
+def test_long_comment_run_with_many_casts_scales_near_linearly() -> None:
+    def measure(comment_lines: int, cast_count: int) -> tuple[int, float]:
+        source = _dense_safety_comment_cast_module(comment_lines, cast_count)
+        started = time.perf_counter()
+        result = analyze_source(source, select=ALL_RULES)
+        elapsed = time.perf_counter() - started
+        assert finding_codes(result).count("TW002") == cast_count
+        return cast_count, elapsed
+
+    small = measure(comment_lines=2000, cast_count=200)
+    large = measure(comment_lines=4000, cast_count=400)
+    assert large[0] / small[0] <= 2.5
+    assert large[1] / small[1] <= 3.25
+
+
 def test_source_index_caches_are_private_and_do_not_change_equality() -> None:
     left = build_source_index('value = "é"\n')
     right = build_source_index('value = "é"\n')

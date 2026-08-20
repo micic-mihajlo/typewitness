@@ -42,7 +42,9 @@ def test_config_defaults_are_immutable() -> None:
     config = Config()
     assert config.select is None
     assert config.ignore == frozenset()
-    assert config.resolved_select() == frozenset({"TW001", "TW002", "TW003"})
+    assert config.resolved_select() == frozenset(
+        {"TW001", "TW002", "TW003", "TW005", "TW006", "TW007", "TW008", "TW009", "TW010"}
+    )
 
 
 def test_finding_is_frozen() -> None:
