@@ -10,7 +10,7 @@ from typewitness.models import VALID_RULE_CODES, AnalysisError, Finding
 from typewitness.rules import RULES
 
 TOOL_NAME = "typewitness"
-DOCS_BASE_URL = "https://github.com/mihajlomicic/typewitness"
+DOCS_BASE_URL = "https://github.com/micic-mihajlo/typewitness"
 TOOL_VERSION = tool_version()
 JSON_SCHEMA = "typewitness-json-1"
 SARIF_VERSION = "2.1.0"

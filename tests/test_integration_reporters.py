@@ -75,7 +75,7 @@ def _json(report: Report) -> Dict[str, Any]:
 
 def test_tool_identity() -> None:
     assert TOOL_NAME == "typewitness"
-    assert DOCS_BASE_URL == "https://github.com/mihajlomicic/typewitness"
+    assert DOCS_BASE_URL == "https://github.com/micic-mihajlo/typewitness"
     assert re.fullmatch(r"\d+\.\d+\.\d+", TOOL_VERSION)
 
 

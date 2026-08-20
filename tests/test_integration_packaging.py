@@ -34,7 +34,7 @@ from tests._integration_support import (
 
 PYPROJECT_TEXT = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
-REPOSITORY_URL = "https://github.com/mihajlomicic/typewitness"
+REPOSITORY_URL = "https://github.com/micic-mihajlo/typewitness"
 
 
 def _unquote(raw: str) -> str:

@@ -25,9 +25,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mihajlomicic/typewitness"
-Issues = "https://github.com/mihajlomicic/typewitness/issues"
-Repository = "https://github.com/mihajlomicic/typewitness"
+Homepage = "https://github.com/micic-mihajlo/typewitness"
+Issues = "https://github.com/micic-mihajlo/typewitness/issues"
+Repository = "https://github.com/micic-mihajlo/typewitness"
 
 [project.scripts]
 typewitness = "typewitness.cli:main"
