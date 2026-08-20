@@ -128,7 +128,7 @@ def test_hook_does_not_require_serial_execution() -> None:
 def test_hook_inserts_end_of_options_before_filenames() -> None:
     hook = _typewitness_hook()
 
-    assert hook.get("args") == ["--"]
+    assert hook.get("args") == ["--format", "text", "--"]
 
 
 def test_hook_declares_no_default_git_mode_arguments() -> None:

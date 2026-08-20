@@ -9,6 +9,13 @@ from typewitness.discovery import MAX_MAX_FILE_BYTES
 from typewitness.errors import TypeWitnessError, UsageError
 from typewitness.exit_codes import resolve_exit_code
 from typewitness.git import DIFF_REF, STAGED, WORKTREE, GitSelection
+from typewitness.presentation import (
+    PresentationContext,
+    present_report,
+    render_markdown,
+    render_pretty,
+    resolve_github_context,
+)
 from typewitness.project import resolve_cli_project
 from typewitness.report import (
     TOOL_VERSION,
@@ -28,7 +35,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("paths", nargs="*", help="files or directories to analyze")
     parser.add_argument("--config", dest="config_path", help="path to pyproject.toml")
     parser.add_argument("--version", action="version", version=f"%(prog)s {TOOL_VERSION}")
-    parser.add_argument("--format", choices=["text", "json", "sarif"], dest="output_format")
+    parser.add_argument(
+        "--format",
+        choices=["text", "json", "sarif", "pretty", "markdown"],
+        dest="output_format",
+    )
     parser.add_argument("--select", action="append", dest="select_rules")
     parser.add_argument("--ignore", action="append", dest="ignore_rules")
     parser.add_argument("--exclude", action="append", dest="exclude_patterns")
@@ -106,6 +117,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pyproject_overlay = load_pyproject_overlay(project)
         cli_overlay = _cli_overlay(args)
         settings = resolve_settings(pyproject_overlay, cli_overlay)
+        output_format = settings.output_format
 
         baseline_path: Optional[Path] = None
         if settings.baseline is not None:
@@ -116,7 +128,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
 
         write_path = baseline_path if args.write_baseline else None
-        machine_format = settings.output_format in {"json", "sarif"}
+        machine_format = output_format in {"json", "sarif"}
+        presentation_format = output_format in {"pretty", "markdown"}
 
         result = run_analysis(
             paths=args.paths,
@@ -131,7 +144,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         if args.write_baseline:
             if machine_format:
-                if settings.output_format == "json":
+                if output_format == "json":
                     sys.stdout.write(render_json(report))
                 else:
                     sys.stdout.write(render_sarif(report))
@@ -141,10 +154,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return 2
             return 0
         elif machine_format:
-            if settings.output_format == "json":
+            if output_format == "json":
                 sys.stdout.write(render_json(report))
             else:
                 sys.stdout.write(render_sarif(report))
+        elif presentation_format:
+            context = PresentationContext(
+                project=project,
+                compare_url=resolve_github_context(),
+                max_file_bytes=settings.max_file_bytes,
+            )
+            presented = present_report(report, context)
+            if output_format == "pretty":
+                sys.stdout.write(render_pretty(presented))
+            else:
+                sys.stdout.write(render_markdown(presented))
         elif result.findings:
             sys.stdout.write(render_text(report))
 

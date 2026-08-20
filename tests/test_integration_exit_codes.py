@@ -10,6 +10,7 @@ from __future__ import annotations
 import itertools
 
 import pytest
+
 from typewitness.errors import (
     BaselineError,
     ConfigError,

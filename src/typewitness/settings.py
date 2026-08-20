@@ -15,7 +15,7 @@ if sys.version_info >= (3, 11):
 else:
     TOML_BACKEND = "tomli"
 
-SUPPORTED_OUTPUT_FORMATS = frozenset({"text", "json", "sarif"})
+SUPPORTED_OUTPUT_FORMATS = frozenset({"text", "json", "sarif", "pretty", "markdown"})
 MAX_PYPROJECT_BYTES = 1_048_576
 RULE_CODE_PATTERN = re.compile(r"^TW\d{3}$")
 SUPPORTED_KEYS = frozenset(
