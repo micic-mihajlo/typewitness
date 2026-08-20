@@ -16,9 +16,6 @@ import os
 from pathlib import Path
 
 import pytest
-from typewitness.errors import TypeWitnessError
-from typewitness.exit_codes import EXIT_USAGE_ERROR
-from typewitness.project import Project, ProjectDiscoveryError, discover_project
 
 from tests._integration_support import (
     CAST_NO_EVIDENCE,
@@ -27,6 +24,9 @@ from tests._integration_support import (
     write_file,
     write_project,
 )
+from typewitness.errors import TypeWitnessError
+from typewitness.exit_codes import EXIT_USAGE_ERROR
+from typewitness.project import Project, ProjectDiscoveryError, discover_project
 
 
 def test_project_root_is_nearest_pyproject_ancestor(tmp_path: Path) -> None:
