@@ -1,0 +1,69 @@
+[project]
+name = "typewitness"
+version = "0.1.0"
+description = "Static analysis for typing.cast and type: ignore evidence"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Mihajlo Micic" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "tomli>=2.4.1 ; python_full_version < '3.11'",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/mihajlomicic/typewitness"
+Issues = "https://github.com/mihajlomicic/typewitness/issues"
+Repository = "https://github.com/mihajlomicic/typewitness"
+
+[project.scripts]
+typewitness = "typewitness.cli:main"
+
+[project.entry-points."flake8.extension"]
+TW = "typewitness.flake8_plugin:TypeWitnessPlugin"
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["UP045", "UP006", "UP035", "UP007"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+packages = ["typewitness", "tests"]
+mypy_path = "src"
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "mypy<2",
+    "pytest>=8.0",
+    "ruff>=0.8",
+]

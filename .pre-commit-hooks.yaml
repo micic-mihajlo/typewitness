@@ -1,0 +1,10 @@
+- id: typewitness
+  name: typewitness
+  description: Static analysis for typing.cast and type: ignore evidence
+  entry: typewitness
+  language: python
+  types_or: [python, pyi]
+  pass_filenames: true
+  args: ["--"]
+  require_serial: false
+  minimum_pre_commit_version: "2.9.0"
