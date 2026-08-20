@@ -56,10 +56,17 @@ After installation, run TypeWitness from a project directory that contains `pypr
 ```bash
 typewitness
 typewitness --format json
+typewitness --format pretty
 typewitness --select TW002 pkg/mod.py
 ```
 
 Findings go to stdout; source analysis errors go to stderr. Exit codes: `0` clean, `1` findings, `2` analysis errors, `3` usage/config/git/filesystem errors.
+
+`text` is always the default, including on a TTY. Pre-commit can allocate a PTY, so auto-pretty would break hook parsers. The shipped hook pins `--format text`.
+
+`--format pretty` prints a per-rule count, a snippet, and a SAFETY hint for suppressible findings. `--format markdown` starts with `<!-- typewitness-report:v1 -->` and is meant for a sticky pull-request comment. Both re-read source at the presentation boundary. `text`, `json`, and `sarif` keep their existing byte layout.
+
+The composite action at `action.yml` posts or updates that comment. An example workflow lives at `.github/workflows/typewitness-pr.yml` and in [examples/github-action.md](examples/github-action.md). Findings are advisory unless `blocking` is `"true"`.
 
 Configuration lives in `[tool.typewitness]` inside `pyproject.toml`. CLI flags override pyproject values. See [Command-line interface](#command-line-interface) for git scoping, baselines, and input limits.
 
@@ -680,7 +687,9 @@ The CLI and integrations enforce bounded reads before analysis:
 
 Before reading a source file, TypeWitness checks `stat().st_size` against the limit, then reads at most that many bytes and verifies the payload did not grow past the cap. Oversize files and files with more than 100,000 physical lines become structured analysis errors (exit code 2) naming the canonical project path and the configured limit; they are never silently skipped.
 
-Flake8 integration is available via the `TW` extension entry point. A pre-commit hook manifest ships in `.pre-commit-hooks.yaml`.
+`--format` accepts `text`, `json`, `sarif`, `pretty`, and `github`. Unset format on a TTY selects `pretty`; otherwise the default is `text`.
+
+Flake8 integration is available via the `TW` extension entry point. A pre-commit hook manifest ships in `.pre-commit-hooks.yaml` and pins `--format text`.
 
 ## Development
 
