@@ -255,8 +255,8 @@ def test_read_source_rejects_file_at_exact_limit_if_growing(
     limit = 6
     original_stat = Path.stat
 
-    def capped_stat(self: Path) -> os.stat_result:
-        result = original_stat(self)
+    def capped_stat(self: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+        result = original_stat(self, *args, **kwargs)
         if self == target:
             return os.stat_result(
                 (
