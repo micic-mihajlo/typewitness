@@ -173,7 +173,7 @@ def test_unknown_output_format_is_a_config_error() -> None:
     assert "xml" in str(excinfo.value)
 
 
-@pytest.mark.parametrize("output_format", ["text", "json", "sarif"])
+@pytest.mark.parametrize("output_format", ["text", "json", "sarif", "pretty", "github"])
 def test_supported_output_formats(output_format: str) -> None:
     table = f'[tool.typewitness]\noutput-format = "{output_format}"\n'
 

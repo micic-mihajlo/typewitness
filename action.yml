@@ -1,0 +1,103 @@
+name: TypeWitness
+description: "Scan typing.cast and type: ignore evidence and post a sticky pull request comment"
+inputs:
+  github-token:
+    description: Token used to create or update the pull request comment
+    required: false
+    default: ${{ github.token }}
+  diff-ref:
+    description: Git ref to diff against. Empty scans the whole project.
+    required: false
+    default: ""
+  blocking:
+    description: Fail the job when TypeWitness reports findings
+    required: false
+    default: "false"
+  comment:
+    description: Post or update a sticky pull request comment
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+
+    - name: Install TypeWitness
+      shell: bash
+      run: python -m pip install --quiet "${GITHUB_ACTION_PATH}"
+
+    - name: Run TypeWitness
+      id: scan
+      shell: bash
+      env:
+        TYPEWITNESS_GITHUB_REPOSITORY: ${{ github.repository }}
+        TYPEWITNESS_GITHUB_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        TYPEWITNESS_DIFF_REF: ${{ inputs.diff-ref }}
+      run: |
+        args=(--format github)
+        if [ -n "${TYPEWITNESS_DIFF_REF}" ]; then
+          args+=(--diff-ref "${TYPEWITNESS_DIFF_REF}")
+        fi
+        set +e
+        python -m typewitness "${args[@]}" > "${RUNNER_TEMP}/typewitness-comment.md"
+        status=$?
+        set -e
+        cat "${RUNNER_TEMP}/typewitness-comment.md"
+        echo "exit-code=${status}" >> "${GITHUB_OUTPUT}"
+
+    - name: Update sticky comment
+      if: github.event_name == 'pull_request' && inputs.comment == 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- typewitness-report -->';
+          const reportPath = `${process.env.RUNNER_TEMP}/typewitness-comment.md`;
+          if (!fs.existsSync(reportPath)) {
+            core.warning('TypeWitness produced no comment body');
+            return;
+          }
+          const body = fs.readFileSync(reportPath, 'utf8');
+          if (!body.startsWith(marker)) {
+            core.warning('TypeWitness output was not a report comment');
+            return;
+          }
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number,
+          });
+          const existing = comments.find((comment) => comment.body && comment.body.startsWith(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });
+          }
+
+    - name: Fail on scanner errors
+      if: steps.scan.outputs.exit-code == '2' || steps.scan.outputs.exit-code == '3'
+      shell: bash
+      env:
+        TYPEWITNESS_EXIT_CODE: ${{ steps.scan.outputs.exit-code }}
+      run: exit "${TYPEWITNESS_EXIT_CODE}"
+
+    - name: Fail when blocking
+      if: inputs.blocking == 'true' && steps.scan.outputs.exit-code == '1'
+      shell: bash
+      run: exit 1

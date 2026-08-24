@@ -469,6 +469,73 @@ def test_help_flag_exits_zero(
         assert flag in captured.out
 
 
+def test_pretty_format_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = write_project(make_root(tmp_path), {"mod.py": CAST_NO_EVIDENCE})
+    monkeypatch.chdir(root)
+
+    assert main(["--format", "pretty"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("TypeWitness found 1 finding in 1 file\n")
+    assert "TW002" in captured.out
+    assert not ANSI.search(captured.out)
+
+
+def test_github_format_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = write_project(make_root(tmp_path), {"mod.py": CAST_NO_EVIDENCE})
+    monkeypatch.chdir(root)
+
+    assert main(["--format", "github"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("<!-- typewitness-report -->\n")
+    assert "| [TW002]" in captured.out
+
+
+def test_default_format_is_text_when_stdout_is_not_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = write_project(make_root(tmp_path), {"mod.py": CAST_NO_EVIDENCE})
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+
+    assert main([]) == 1
+
+    captured = capsys.readouterr()
+    finding = analyze_text("mod.py", CAST_NO_EVIDENCE).findings[0]
+    expected = (
+        f"mod.py:{finding.range.start.line}:{finding.range.start.column + 1}: "
+        f"{finding.code} {finding.message}"
+    )
+    assert captured.out.splitlines() == [expected]
+
+
+def test_default_format_is_pretty_when_stdout_is_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = write_project(make_root(tmp_path), {"mod.py": CAST_NO_EVIDENCE})
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    assert main([]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("TypeWitness found 1 finding in 1 file\n")
+    assert "TW002" in captured.out
+
+
 # ------------------------------------------------------------------ config precedence
 
 

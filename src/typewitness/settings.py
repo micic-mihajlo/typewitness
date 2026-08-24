@@ -15,7 +15,7 @@ if sys.version_info >= (3, 11):
 else:
     TOML_BACKEND = "tomli"
 
-SUPPORTED_OUTPUT_FORMATS = frozenset({"text", "json", "sarif"})
+SUPPORTED_OUTPUT_FORMATS = frozenset({"text", "json", "sarif", "pretty", "github"})
 MAX_PYPROJECT_BYTES = 1_048_576
 RULE_CODE_PATTERN = re.compile(r"^TW\d{3}$")
 SUPPORTED_KEYS = frozenset(
@@ -244,3 +244,14 @@ def resolve_settings(*overlays: SettingsOverlay) -> Settings:
         baseline=baseline,
         max_file_bytes=max_file_bytes,
     )
+
+
+def effective_output_format(
+    resolved: str,
+    cli_format: Optional[str],
+    pyproject_format: Optional[str],
+    stdout_is_tty: bool,
+) -> str:
+    if cli_format is None and pyproject_format is None and stdout_is_tty:
+        return "pretty"
+    return resolved
