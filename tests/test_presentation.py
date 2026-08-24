@@ -128,11 +128,17 @@ def test_pretty_caret_sits_under_column(tmp_path: Path) -> None:
     write_project(root, {"mod.py": CAST_NO_EVIDENCE})
     finding = analyze_text("mod.py", CAST_NO_EVIDENCE).findings[0]
     rendered = render_pretty(present_report(_report((finding,)), _context(root)))
-    lines = rendered.splitlines()
-    snippet_line = next(line for line in lines if line.endswith("value = cast(int, 1)"))
-    caret_line = lines[lines.index(snippet_line) + 1]
-    source_start = snippet_line.index("| ") + 2
-    assert caret_line.index("^") - source_start == finding.range.start.column
+    _assert_caret_under_cast(rendered)
+
+
+def test_pretty_caret_accounts_for_escaped_tabs(tmp_path: Path) -> None:
+    source = "from typing import cast\n\nvalue =\tcast(int, 1)\n"
+    root = make_root(tmp_path)
+    write_project(root, {"mod.py": source})
+    finding = analyze_text("mod.py", source).findings[0]
+    rendered = render_pretty(present_report(_report((finding,)), _context(root)))
+    assert "\\x09" in rendered
+    _assert_caret_under_cast(rendered)
 
 
 def test_pretty_empty_findings_is_empty(tmp_path: Path) -> None:
@@ -164,11 +170,19 @@ def test_effective_output_format_tty_default() -> None:
     assert effective_output_format("github", None, "github", True) == "github"
 
 
+def _assert_caret_under_cast(rendered: str) -> None:
+    lines = rendered.splitlines()
+    snippet_line = next(line for line in lines if "cast(int, 1)" in line and " | " in line)
+    caret_line = lines[lines.index(snippet_line) + 1]
+    assert caret_line.index("^") == snippet_line.index("cast(")
+
+
 def test_action_yml_posts_sticky_github_report() -> None:
     text = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
     assert PR_COMMENT_MARKER in text
     assert "--format github" in text
     assert "blocking" in text
+    assert 'description: "Scan typing.cast and type: ignore' in text
 
 
 def test_pr_workflow_uses_the_composite_action() -> None:

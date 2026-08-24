@@ -1,5 +1,5 @@
 name: TypeWitness
-description: Scan typing.cast and type: ignore evidence and post a sticky pull request comment
+description: "Scan typing.cast and type: ignore evidence and post a sticky pull request comment"
 inputs:
   github-token:
     description: Token used to create or update the pull request comment

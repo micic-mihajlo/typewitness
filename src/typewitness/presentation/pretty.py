@@ -67,6 +67,13 @@ def _render_snippet(snippet: CodeSnippet) -> List[str]:
         displayed = escape_text_output(line)
         lines.append(f"    {line_no:>{width}} | {displayed}")
         if line_no == highlight_line_no:
-            caret_column = min(max(snippet.highlight_column, 0), len(displayed))
+            caret_column = _display_column(line, snippet.highlight_column)
+            caret_column = min(max(caret_column, 0), len(displayed))
             lines.append(f"{' ' * (gutter + caret_column)}^")
     return lines
+
+
+def _display_column(line: str, column: int) -> int:
+    if column <= 0:
+        return 0
+    return len(escape_text_output(line[:column]))
